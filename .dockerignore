@@ -5,3 +5,5 @@
 !.build/linux-armv7
 !.build/linux-arm64
 !.build/linux-ppc64le
+vendor
+.git

@@ -67,6 +67,7 @@ var (
 		"bandwidthOut":   newServerMetric("transmit_bytes", "Current bandwidth out per second", nil, nil),
 		"currentStreams": newServerMetric("current_streams", "Current number of active streams", nil, nil),
 		"uptime":         newServerMetric("uptime_seconds_total", "Number of seconds NGINX-RTMP started", nil, nil),
+		"totalClients":   newServerMetric("total_clients", "Total number of clients connected", nil, nil),
 	}
 	streamMetrics = metrics{
 		"bytesIn":      newStreamMetric("incoming_bytes_total", "Current total of incoming bytes", []string{"stream"}, nil),
@@ -97,6 +98,7 @@ type ServerInfo struct {
 	BandwidthIn float64
 	BandwidhOut float64
 	Uptime      float64
+	TotClients  float64
 }
 
 // StreamInfo characteristics of a stream
@@ -110,7 +112,7 @@ type StreamInfo struct {
 }
 
 // NewServerInfo builds a ServerInfo struct from string values
-func NewServerInfo(bytesIn, bytesOut, bandwidthIn, bandwidthOut, uptime string) ServerInfo {
+func NewServerInfo(bytesIn, bytesOut, bandwidthIn, bandwidthOut, uptime string, totalClients float64) ServerInfo {
 	var bytesInNum, bytesOutNum, bandwidthInNum, bandwidthOutNum, uptimeNum float64
 	if n, err := strconv.ParseFloat(bytesIn, 64); err == nil {
 		bytesInNum = n
@@ -133,6 +135,7 @@ func NewServerInfo(bytesIn, bytesOut, bandwidthIn, bandwidthOut, uptime string) 
 		BandwidthIn: bandwidthInNum,
 		BandwidhOut: bandwidthOutNum,
 		Uptime:      uptimeNum,
+		TotClients:  totalClients,
 	}
 }
 
@@ -211,7 +214,21 @@ func parseServerStats(doc *xmlquery.Node) (ServerInfo, error) {
 	transmitBytes := data.SelectElement("bw_out").InnerText()
 	uptime := data.SelectElement("uptime").InnerText()
 
-	return NewServerInfo(bytesIn, bytesOut, receiveBytes, transmitBytes, uptime), nil
+	var numClients int64
+	live := xmlquery.Find(doc, "//application/live/nclients")
+	for _, el := range live {
+		if n, err := strconv.ParseInt(el.InnerText(), 10, 64); err == nil {
+			numClients += n
+		}
+	}
+	play := xmlquery.Find(doc, "//application/play/nclients")
+	for _, el := range play {
+		if n, err := strconv.ParseInt(el.InnerText(), 10, 64); err == nil {
+			numClients += n
+		}
+	}
+
+	return NewServerInfo(bytesIn, bytesOut, receiveBytes, transmitBytes, uptime, float64(numClients)), nil
 }
 
 func parseStreamsStats(doc *xmlquery.Node, streamNameNormalizer *regexp.Regexp) ([]StreamInfo, error) {
@@ -261,6 +278,7 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(e.serverMetrics["bandwidthIn"], prometheus.GaugeValue, server.BandwidthIn)
 	ch <- prometheus.MustNewConstMetric(e.serverMetrics["bandwidthOut"], prometheus.GaugeValue, server.BandwidhOut)
 	ch <- prometheus.MustNewConstMetric(e.serverMetrics["uptime"], prometheus.CounterValue, server.Uptime)
+	ch <- prometheus.MustNewConstMetric(e.serverMetrics["totalClients"], prometheus.GaugeValue, server.TotClients)
 
 	streams, err := parseStreamsStats(doc, e.streamNameNormalizer)
 	if err != nil {
